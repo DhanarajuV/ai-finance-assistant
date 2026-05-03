@@ -1,0 +1,16 @@
+llm:
+  model: "gemini-2.5-flash"
+  temperature: 0.3
+
+embedding:
+  model: "models/gemini-embedding-001"
+
+rag:
+  chunk_size: 500
+  chunk_overlap: 50
+  top_k: 3
+
+app:
+  name: "Finnie"
+  description: "Your AI-powered personal finance education assistant"
+  disclaimer: "This is for educational purposes only, not financial advice."
