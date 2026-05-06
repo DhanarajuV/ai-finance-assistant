@@ -49,7 +49,7 @@ with tab_chat:
             stock_symbol = None
 
             if agent_type == "portfolio":
-                fig = portfolio_pie_chart(response)
+                fig = portfolio_pie_chart(response or "")
                 if not fig:
                     fig = portfolio_pie_chart(prompt)
                 if fig:

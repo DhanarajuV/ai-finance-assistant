@@ -9,6 +9,8 @@ def portfolio_pie_chart(text: str) -> go.Figure:
     - 'AAPL: 46.5%'
     """
     import re
+    if not text or not isinstance(text, str):
+      return None
     names = []
     values = []
 
