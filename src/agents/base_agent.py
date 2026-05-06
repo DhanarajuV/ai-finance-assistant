@@ -51,7 +51,15 @@ class BaseAgent:
             response = self.llm_with_tools.invoke(messages)
 
         # Update history with this exchange
-        chat_history.append(HumanMessage(content=user_message))
-        chat_history.append(AIMessage(content=response.content))
+        # Extract text content (handle both string and list formats)
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                block.get("text", "") for block in content if isinstance(block, dict)
+            )
 
-        return response.content, chat_history
+        # Update history with this exchange
+        chat_history.append(HumanMessage(content=user_message))
+        chat_history.append(AIMessage(content=content))
+
+        return content, chat_history
