@@ -37,7 +37,10 @@ def project_investment(monthly_amount: float, years: int, annual_return: float =
     for milestone in [5, 10, 20, 30]:
         if milestone <= years:
             m = milestone * 12
-            fv = monthly_amount * (((1 + monthly_rate) ** m - 1) / monthly_rate)
+            if monthly_rate > 0:
+                fv = monthly_amount * (((1 + monthly_rate) ** m - 1) / monthly_rate)
+            else:
+                fv = monthly_amount * m
             result += f"  Year {milestone}: ${fv:,.2f}\n"
 
     return result

@@ -30,11 +30,12 @@ Finnie is a multi-agent AI-powered personal finance education assistant that dem
 │                  LangGraph Workflow                        │
 │                                                           │
 │   START ──▶ ┌──────────────┐                              │
-│             │ Router Node  │ (LLM-based classification)   │
+│             │ Router Node  │ (LLM classifies → 1 or more) │
 │             └──────┬───────┘                              │
 │                    ▼                                      │
 │             ┌──────────────┐                              │
-│             │  Agent Node  │ (dispatches to selected agent)│
+│             │  Agent Node  │ (sequential chaining with    │
+│             │              │  context accumulation)        │
 │             └──────┬───────┘                              │
 │                    ▼                                      │
 │                   END                                     │
@@ -73,15 +74,18 @@ User Input (natural language)
     │
     ▼
 Router Node
-    │  LLM classifies query into one of 6 categories
+    │  LLM classifies query into one OR MORE categories
     │  (temperature=0 for deterministic routing)
+    │  Returns: list of agent types (e.g., ["market", "portfolio", "goal_planning"])
     ▼
-Agent Node
-    │  Selected agent receives user message + chat history
-    │  Agent builds message list: SystemMessage + history + HumanMessage
-    │  LLM may request tool calls
-    │  Tools execute and return results
-    │  LLM generates final response
+Agent Node (Sequential Chaining)
+    │  Sorts agents by priority (data-gathering first, planning last)
+    │  For each agent:
+    │    1. Enriches user message with accumulated context from previous agents
+    │    2. Agent builds message list: SystemMessage + history + enriched message
+    │    3. LLM may request tool calls → tools execute → results returned
+    │    4. Agent's response added to accumulated context
+    │  All responses combined with separators
     ▼
 Response returned to UI
     │  UI renders text + optional charts
@@ -98,11 +102,35 @@ LangGraph manages a typed state dictionary that flows through the graph:
 class AgentState(TypedDict):
     user_message: str      # Current user input
     chat_history: list     # List of HumanMessage/AIMessage objects
-    agent_type: str        # Router's classification result
-    response: str          # Agent's final response text
+    agent_types: list      # Router's classification result (one or more agents)
+    response: str          # Combined agent responses
 ```
 
-The router node writes `agent_type`. The agent node writes `response` and updates `chat_history`. The UI reads all fields.
+The router node writes `agent_types` (a list). The agent node iterates through them sequentially, accumulating context, and writes the combined `response`. The UI reads all fields.
+
+### 2.4 Multi-Agent Sequential Chaining
+
+When a query requires multiple agents, they execute in a defined priority order:
+
+```python
+AGENT_PRIORITY = {
+    "market": 1,       # Gather real-time data first
+    "news": 2,         # Gather news context
+    "finance_qa": 3,   # Provide knowledge base info
+    "tax": 4,          # Provide tax knowledge
+    "portfolio": 5,    # Analyze using gathered data
+    "goal_planning": 6,# Plan using everything above
+}
+```
+
+Each agent receives the user's original message **plus** accumulated context from all previous agents. This enables:
+- Portfolio Agent to use real market prices from Market Agent
+- Goal Planning Agent to reference the allocation from Portfolio Agent
+
+Example flow for "Analyze Apple and Microsoft and plan my $100k among them":
+1. **Market Agent** → fetches AAPL ($284) and MSFT ($411) prices
+2. **Portfolio Agent** → sees market data, suggests 50/50 split, analyzes risk
+3. **Goal Planning Agent** → sees allocation, projects growth over time
 
 ---
 
@@ -133,11 +161,15 @@ Each specialized agent defines only two things:
 
 ### 3.3 Router Design
 
-The router is an LLM call with `temperature=0` (deterministic) and a system prompt that maps query types to agent categories. It returns a single category string.
+The router is an LLM call with `temperature=0` (deterministic) and a system prompt that maps query types to agent categories. It returns **one or more** category strings.
 
 **Classification categories**: `finance_qa`, `portfolio`, `market`, `goal_planning`, `news`, `tax`
 
-**Fallback**: If the LLM returns an unrecognized category, the router defaults to `finance_qa` — the safest general-purpose agent.
+**Multi-intent detection**: If a query spans multiple domains (e.g., "analyze Apple stock and plan my investment"), the router returns all applicable categories: `["market", "portfolio", "goal_planning"]`.
+
+**Fallback**: If the LLM returns an unrecognized category, the router defaults to `["finance_qa"]` — the safest general-purpose agent.
+
+**Execution order**: Agents are sorted by priority before execution. Data-gathering agents (market, news) run first so their output is available to analytical agents (portfolio, goal planning).
 
 **Design tradeoff**: Some overlap exists between agents (e.g., "What is a Roth IRA?" could go to `finance_qa` or `tax`). This is acceptable because both agents can handle such queries — the difference is the system prompt emphasis. Perfect routing is not the goal; graceful handling is.
 
@@ -368,7 +400,9 @@ The project uses `setup.py` + `-e .` in `requirements.txt` to make `src.*` impor
 
 ## 11. Performance Considerations
 
-- **Router cost**: Each query makes 2 LLM calls (1 for routing, 1 for the agent). The router call is cheap (~20 tokens response).
+- **Router cost**: Each query makes 1 router call + N agent calls (where N = number of agents triggered, typically 1-3). The router call is cheap (~20 tokens response).
+- **Multi-agent queries**: Complex queries trigger 2-3 agents sequentially. Each agent call adds ~1-3 seconds. Total response time for a 3-agent query: ~5-10 seconds.
+- **Context accumulation**: In multi-agent chaining, each subsequent agent receives a longer prompt (original message + previous agents' outputs). Token usage grows with each agent in the chain.
 - **RAG embedding**: Query embedding happens on every RAG search. Cached FAISS index avoids re-embedding articles.
 - **yFinance**: No rate limits, but network latency adds ~1-2s per stock lookup. No caching implemented (acceptable for demo scale).
 - **Chat history growth**: All messages sent to LLM on every turn. For long conversations, token usage grows linearly. Acceptable for demo; production would need history trimming or summarization.
@@ -426,8 +460,8 @@ Show each agent being triggered by natural language:
 
 ### Architecture Walkthrough (1 minute)
 - Show the project structure briefly
-- Explain: "User query → LLM router → specialized agent → tool execution → response"
-- Mention: 50 articles in RAG knowledge base, FAISS vector store, LangGraph state graph
+- Explain: "User query → LLM router detects intent(s) → multiple agents chain sequentially with context passing → combined response"
+- Mention: 50 articles in RAG knowledge base, FAISS vector store, LangGraph state graph, multi-agent chaining
 
 ### Closing (30 seconds)
 - Mention the tech stack: Gemini 2.5 Flash, LangGraph, FAISS, Streamlit, yFinance
@@ -436,7 +470,57 @@ Show each agent being triggered by natural language:
 
 ---
 
-## 14. Future Enhancements
+## 14. MCP Server (Model Context Protocol)
+
+### 14.1 Overview
+
+Finnie exposes its tools via an MCP server, enabling integration with MCP-compatible AI clients like Claude Desktop.
+
+### 14.2 Exposed Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_stock_price` | Real-time stock price and metrics |
+| `analyze_portfolio` | Portfolio allocation and risk analysis |
+| `project_investment` | Compound interest growth projections |
+| `search_financial_knowledge` | RAG search over 50 financial articles |
+| `get_financial_news` | Recent financial news headlines |
+
+### 14.3 Running the MCP Server
+
+```bash
+# Direct execution
+python src/mcp_server.py
+
+# With MCP Inspector (for testing)
+npx @modelcontextprotocol/inspector venv/bin/python src/mcp_server.py
+```
+
+### 14.4 Claude Desktop Configuration
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "finnie": {
+      "command": "/path/to/venv/bin/python",
+      "args": ["/path/to/src/mcp_server.py"],
+      "env": {
+        "GOOGLE_API_KEY": "your_key"
+      }
+    }
+  }
+}
+```
+
+### 14.5 Architecture Note
+
+The MCP server and Streamlit app are independent interfaces to the same tool logic. The MCP server runs locally (stdio-based protocol), while the Streamlit app deploys to the cloud.
+
+---
+
+## 15. Future Enhancements
 
 - **Voice interface** for accessibility
 - **History trimming/summarization** for long conversations
