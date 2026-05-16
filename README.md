@@ -366,6 +366,30 @@ streamlit run src/web_app/app.py --logger.level=debug
 
 ---
 
+## Testing
+
+### Run all tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Run with coverage report
+
+```bash
+python -m pytest tests/ --cov=src --cov-report=term
+```
+
+This prints coverage percentage per module and a total at the bottom.
+
+### Test summary
+
+- **89 tests** covering tools, agents, router, workflow, config, charts, and knowledge base
+- Core logic coverage: 80%+
+- Tests use mocks for LLM calls (no API key needed to run tests)
+
+---
+
 ## Deployment
 
 ### Streamlit Community Cloud (Recommended)

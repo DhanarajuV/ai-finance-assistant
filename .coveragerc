@@ -1,0 +1,4 @@
+[run]
+omit =
+    src/web_app/app.py
+    src/mcp_server.py
